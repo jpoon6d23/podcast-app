@@ -49,8 +49,14 @@
   .hidden{display:none!important;}
   .progress{height:6px;background:var(--panel2);border-radius:6px;overflow:hidden;margin-top:12px;}
   .progress > div{height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .2s;}
-  .recRow{background:var(--panel2);border:1px solid #2c3354;border-radius:14px;padding:12px;margin-bottom:10px;}
+  .recRow{background:var(--panel2);border:1px solid #2c3354;border-radius:14px;margin-bottom:10px;overflow:hidden;}
   .recRow.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);}
+  .recSummary{display:flex;align-items:center;gap:10px;padding:14px 12px;cursor:pointer;list-style:none;}
+  .recSummary::-webkit-details-marker{display:none;}
+  .recSummary::after{content:'⌄';color:var(--muted);font-size:18px;flex:0 0 auto;margin-left:2px;}
+  .recDetails[open] .recSummary::after{content:'⌃';}
+  .recTitleLine{font-weight:600;font-size:15px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .recBody{padding:0 12px 14px;}
   .recTop{display:flex;align-items:center;gap:10px;}
   .recName{font-weight:600;font-size:15px;flex:1;}
   .recName.untitled{color:var(--muted);font-weight:500;font-style:italic;}
@@ -99,8 +105,7 @@
   <!-- RECORD -->
   <div class="card">
     <div class="timer" id="timer">00:00</div>
-    <canvas id="liveCanvas" height="90"></canvas>
-    <div style="height:12px"></div>
+    <canvas id="liveCanvas" height="90" class="hidden"></canvas>
     <button class="primary" id="recBtn">● Record</button>
     <input type="file" id="fileInput" accept="audio/*" class="hidden">
     <div class="status" id="recStatus"></div>
@@ -317,43 +322,48 @@ async function renderList(){
     const name=`<input class="recNameInput${r.title?'':' untitled'}" data-rename="${r.id}" value="${(r.title||'').replace(/"/g,'&quot;')}" placeholder="Untitled — tap to name">`;
     const made=r.video?'<span class="tag">video ready</span>':'';
     row.innerHTML=`
-      <div class="recTop">
-        <div class="selbox ${selected.has(r.id)?'on':''}" data-sel="${r.id}">${selected.has(r.id)?'✓':''}</div>
-        ${name}${made}
-        <span class="recMeta">${r.dur?r.dur+' · ':''}${timeAgo(r.date)}</span>
-      </div>
-      <audio controls preload="none" src="${url}"></audio>
-      <div class="speedRow">
-        <span>速度</span>
-        <button class="spd active" data-spd="1">1x</button>
-        <button class="spd" data-spd="1.25">1.25x</button>
-        <button class="spd" data-spd="1.5">1.5x</button>
-        <button class="spd" data-spd="2">2x</button>
-      </div>
-      <div class="recBtns">
-        <button class="primary small" data-make="${r.id}">🎬 Make podcast</button>
-        <button class="ghost icon" data-del="${r.id}" title="Delete">🗑</button>
-      </div>
-      <details class="notesBox">
-        <summary>📝 重點${r.summary?' ✓':''}</summary>
-        ${r.summary?`<div class="sumOut" style="white-space:pre-line">${r.summary.replace(/</g,'&lt;')}
-          ${r.titleSug?`<div style="margin-top:8px;color:var(--muted)">標題建議：${r.titleSug.replace(/</g,'&lt;')}
-          <button class="ghost small" data-usetitle="${r.id}" style="margin-top:6px">用呢個做標題</button></div>`:''}</div>`:''}
-        <div class="autoStatus" data-autostatus="${r.id}"></div>
-        <div class="recBtns" style="margin-top:8px">
-          <button class="${r.summary?'ghost':'primary'} small" data-auto="${r.id}">${r.summary?'重新整理重點':'✨ 整理重點'}</button>
+      <details class="recDetails">
+        <summary class="recSummary">
+          <div class="selbox ${selected.has(r.id)?'on':''}" data-sel="${r.id}">${selected.has(r.id)?'✓':''}</div>
+          <span class="recTitleLine">${(r.title||'未命名').replace(/</g,'&lt;')}</span>${made}
+          <span class="recMeta">${r.dur?r.dur+' · ':''}${timeAgo(r.date)}</span>
+        </summary>
+        <div class="recBody">
+          <div style="margin:6px 0">${name}</div>
+          <audio controls preload="none" src="${url}"></audio>
+          <div class="speedRow">
+            <span>速度</span>
+            <button class="spd active" data-spd="1">1x</button>
+            <button class="spd" data-spd="1.25">1.25x</button>
+            <button class="spd" data-spd="1.5">1.5x</button>
+            <button class="spd" data-spd="2">2x</button>
+          </div>
+          <div class="recBtns">
+            <button class="primary small" data-make="${r.id}">🎬 Make podcast</button>
+            <button class="ghost icon" data-del="${r.id}" title="Delete">🗑</button>
+          </div>
+          <details class="notesBox">
+            <summary>📝 重點${r.summary?' ✓':''}</summary>
+            ${r.summary?`<div class="sumOut" style="white-space:pre-line">${r.summary.replace(/</g,'&lt;')}
+              ${r.titleSug?`<div style="margin-top:8px;color:var(--muted)">標題建議：${r.titleSug.replace(/</g,'&lt;')}
+              <button class="ghost small" data-usetitle="${r.id}" style="margin-top:6px">用呢個做標題</button></div>`:''}</div>`:''}
+            <div class="autoStatus" data-autostatus="${r.id}"></div>
+            <div class="recBtns" style="margin-top:8px">
+              <button class="${r.summary?'ghost':'primary'} small" data-auto="${r.id}">${r.summary?'重新整理重點':'✨ 整理重點'}</button>
+            </div>
+            <details style="margin-top:8px"><summary style="font-size:12px;color:var(--muted);cursor:pointer">逐字稿 / 手動輸入</summary>
+              <textarea data-notes="${r.id}" placeholder="自動轉錄會出現喺度。冇嘅話可以撳呢度，用 iPhone 鍵盤 🎤 講低，或者打字。">${(r.transcript||r.notes||'').replace(/</g,'&lt;')}</textarea>
+              <button class="ghost small" data-sum="${r.id}">用呢段文字整重點（離線）</button>
+            </details>
+          </details>
+          ${r.video?`<div style="margin-top:10px"><video controls playsinline src="${URL.createObjectURL(r.video)}"></video>
+            <button class="primary" data-share="${r.id}" style="margin-top:8px">📤 儲存 / 上載 YouTube</button>
+            <div class="mini" style="text-align:left;margin-top:6px">手機：彈出分享選單揀 YouTube。電腦：自動下載影片並開啟 YouTube 上載頁，拖檔案上去即可。</div></div>`:''}
         </div>
-        <details style="margin-top:8px"><summary style="font-size:12px;color:var(--muted);cursor:pointer">逐字稿 / 手動輸入</summary>
-          <textarea data-notes="${r.id}" placeholder="自動轉錄會出現喺度。冇嘅話可以撳呢度，用 iPhone 鍵盤 🎤 講低，或者打字。">${(r.transcript||r.notes||'').replace(/</g,'&lt;')}</textarea>
-          <button class="ghost small" data-sum="${r.id}">用呢段文字整重點（離線）</button>
-        </details>
-      </details>
-      ${r.video?`<div style="margin-top:10px"><video controls playsinline src="${URL.createObjectURL(r.video)}"></video>
-        <button class="primary" data-share="${r.id}" style="margin-top:8px">📤 儲存 / 上載 YouTube</button>
-        <div class="mini" style="text-align:left;margin-top:6px">手機：彈出分享選單揀 YouTube。電腦：自動下載影片並開啟 YouTube 上載頁，拖檔案上去即可。</div></div>`:''}`;
+      </details>`;
     list.appendChild(row);
   });
-  list.querySelectorAll('[data-sel]').forEach(b=>b.onclick=()=>toggleSel(+b.dataset.sel));
+  list.querySelectorAll('[data-sel]').forEach(b=>b.onclick=(e)=>{ e.preventDefault(); e.stopPropagation(); toggleSel(+b.dataset.sel); });
   list.querySelectorAll('[data-make]').forEach(b=>b.onclick=()=>startMake([+b.dataset.make],false));
   list.querySelectorAll('[data-wa]').forEach(b=>b.onclick=()=>sendRec(+b.dataset.wa));
   list.querySelectorAll('[data-dl]').forEach(b=>b.onclick=()=>downloadRec(+b.dataset.dl));
