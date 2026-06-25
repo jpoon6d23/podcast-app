@@ -222,11 +222,17 @@ function stopLiveViz(){ cancelAnimationFrame(liveRAF); if(liveCtx)liveCtx.close(
   const c=$('#liveCanvas');c.getContext('2d').clearRect(0,0,c.width,c.height);}
 
 /* ============ RECORD ============ */
+async function getMic(){
+  // reuse one live stream so iOS doesn't re-prompt for the mic every time
+  if(mediaStream && mediaStream.active && mediaStream.getAudioTracks().some(t=>t.readyState==='live')) return mediaStream;
+  const ns=(ncMode!=='off');
+  mediaStream=await navigator.mediaDevices.getUserMedia({audio:{noiseSuppression:ns,echoCancellation:ns,autoGainControl:true,channelCount:1}});
+  return mediaStream;
+}
 $('#recBtn').addEventListener('click', async ()=>{
   if(isRecording){ recorder.stop(); return; }
   try{
-    const ns=(ncMode!=='off');
-    mediaStream=await navigator.mediaDevices.getUserMedia({audio:{noiseSuppression:ns,echoCancellation:ns,autoGainControl:true,channelCount:1}});
+    await getMic();
     recChunks=[];
     const mime=MediaRecorder.isTypeSupported('audio/mp4')?'audio/mp4':(MediaRecorder.isTypeSupported('audio/webm')?'audio/webm':'');
     recorder=new MediaRecorder(mediaStream,mime?{mimeType:mime}:undefined);
@@ -234,7 +240,8 @@ $('#recBtn').addEventListener('click', async ()=>{
     recorder.onstop=async ()=>{
       const dur=$('#timer').textContent;
       const blob=new Blob(recChunks,{type:recorder.mimeType||'audio/webm'});
-      mediaStream.getTracks().forEach(t=>t.stop()); stopLiveViz(); stopRecog(); endRecUI();
+      // keep mediaStream ALIVE so the next Record won't re-ask for mic permission
+      stopLiveViz(); stopRecog(); endRecUI();
       const transcript=liveTranscript.trim();
       // SAVE RAW AUDIO IMMEDIATELY — before anything else can fail
       try{
@@ -325,8 +332,6 @@ async function renderList(){
       </div>
       <div class="recBtns">
         <button class="primary small" data-make="${r.id}">🎬 Make podcast</button>
-        <button class="ghost small" data-wa="${r.id}" title="Send via WhatsApp / share">📤 Send</button>
-        <button class="ghost icon" data-dl="${r.id}" title="Download audio">⬇️</button>
         <button class="ghost icon" data-del="${r.id}" title="Delete">🗑</button>
       </div>
       <details class="notesBox">
