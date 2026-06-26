@@ -751,14 +751,25 @@ async function pullAll(){
   const files=await res.json();
   const out=[];
   for(const f of files){ if(!f.name.endsWith('.json'))continue;
-    // fetch each file via Contents API -> base64 content -> decode (works for private repos)
     const fr=await ghApi('recordings/'+f.name);
     if(!fr.ok) continue;
     const meta=await fr.json();
     try{
-      const txt=b64ToUtf8((meta.content||'').replace(/\n/g,''));
+      let txt;
+      if(meta.content && meta.content.length){
+        // small file: content is inline base64
+        txt=b64ToUtf8(meta.content.replace(/\n/g,''));
+      } else {
+        // big file (>1MB): Contents API omits content -> use the Git blob API (handles large files, private repo)
+        const {token,repo}=ghCfg();
+        const br=await fetch('https://api.github.com/repos/'+repo+'/git/blobs/'+meta.sha,{
+          headers:{'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json'}});
+        if(!br.ok) continue;
+        const bj=await br.json();
+        txt=b64ToUtf8((bj.content||'').replace(/\n/g,''));
+      }
       out.push(JSON.parse(txt));
-    }catch(e){ /* skip a corrupt file */ }
+    }catch(e){ /* skip a genuinely broken file */ }
   }
   return out;
 }
