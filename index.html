@@ -171,7 +171,7 @@ let liveCtx, liveAnalyser, liveRAF;
 let selected=new Set();        // ids selected for merge
 let makeContext=null;          // {ids:[...], isMerge:bool}
 let recog=null, liveTranscript='';   // Web Speech live transcription
-const ncMode='windy';                // fixed: outdoor/wind mode by default
+const ncMode='strong';               // gentler than 'windy' — less artifact/musical-noise
 
 function fmt(s){const m=Math.floor(s/60),x=Math.floor(s%60);return String(m).padStart(2,'0')+':'+String(x).padStart(2,'0');}
 
@@ -310,11 +310,17 @@ $('#fileInput').addEventListener('change', async e=>{
 });
 
 /* ============ RECORDINGS LIST ============ */
+let openRecIds=new Set();   // which recording rows are expanded
 async function renderList(){
-  const recs=await allRecs();
+  // don't rebuild while audio/video is playing or a row is open being used — avoids collapsing mid-action
   const list=$('#recList');
-  if(!recs.length){ list.innerHTML='<div class="mini">No recordings yet. Tap Record above — your audio is saved instantly, even before making a video.</div>';
+  const playing=[...list.querySelectorAll('audio,video')].some(m=>!m.paused && !m.ended && m.currentTime>0);
+  if(playing){ return; }            // skip this render; next sync tick will catch up
+  const recs=await allRecs();
+  if(!recs.length){ list.innerHTML='<div class="mini">未有錄音。撳上面「Record」開始 — 錄完即刻儲存。</div>';
     updateMergeBar(); return; }
+  // remember currently-open rows so we can restore after rebuild
+  list.querySelectorAll('.recDetails[open]').forEach(d=>{ const id=d.getAttribute('data-rid'); if(id) openRecIds.add(+id); });
   list.innerHTML='';
   recs.forEach(r=>{
     const row=document.createElement('div'); row.className='recRow'+(selected.has(r.id)?' sel':'');
@@ -322,7 +328,7 @@ async function renderList(){
     const name=`<input class="recNameInput${r.title?'':' untitled'}" data-rename="${r.id}" value="${(r.title||'').replace(/"/g,'&quot;')}" placeholder="Untitled — tap to name">`;
     const made=r.video?'<span class="tag">video ready</span>':'';
     row.innerHTML=`
-      <details class="recDetails">
+      <details class="recDetails" data-rid="${r.id}" ${openRecIds.has(r.id)?'open':''}>
         <summary class="recSummary">
           <div class="selbox ${selected.has(r.id)?'on':''}" data-sel="${r.id}">${selected.has(r.id)?'✓':''}</div>
           <span class="recTitleLine">${(r.title||'未命名').replace(/</g,'&lt;')}</span>${made}
@@ -363,6 +369,11 @@ async function renderList(){
       </details>`;
     list.appendChild(row);
   });
+  // remember open/close so re-renders (e.g. background sync) don't collapse the row you're using
+  list.querySelectorAll('.recDetails').forEach(d=>d.addEventListener('toggle',()=>{
+    const id=+d.getAttribute('data-rid');
+    if(d.open) openRecIds.add(id); else openRecIds.delete(id);
+  }));
   list.querySelectorAll('[data-sel]').forEach(b=>b.onclick=(e)=>{ e.preventDefault(); e.stopPropagation(); toggleSel(+b.dataset.sel); });
   list.querySelectorAll('[data-make]').forEach(b=>b.onclick=()=>startMake([+b.dataset.make],false));
   list.querySelectorAll('[data-wa]').forEach(b=>b.onclick=()=>sendRec(+b.dataset.wa));
