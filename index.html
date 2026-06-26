@@ -683,29 +683,57 @@ function wrapText(text,x,y,maxW,size){
 function drawPoster(){ bg(); wrapText(($('#title')?$('#title').value.trim():'')||'Your Title',640,380,1080,72); }
 drawPoster();
 
-// STATIC video: one title frame + audio. Light enough for long recordings & mobile.
+// ---- ffmpeg.wasm (single-thread; works without crossOriginIsolated headers) ----
+let _ffmpeg=null, _ffmpegLoading=null;
+function loadScript(src){ return new Promise((res,rej)=>{ const s=document.createElement('script');
+  s.src=src; s.onload=res; s.onerror=()=>rej(new Error('load '+src)); document.head.appendChild(s); }); }
+async function getFFmpeg(onStatus){
+  if(_ffmpeg) return _ffmpeg;
+  if(_ffmpegLoading) return _ffmpegLoading;
+  _ffmpegLoading=(async()=>{
+    if(onStatus) onStatus('載入影片引擎中…（首次約 25MB，請等）');
+    if(!window.FFmpeg) await loadScript('https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js');
+    const { createFFmpeg }=window.FFmpeg;
+    const ff=createFFmpeg({ log:false, mainName:'main', corePath:'https://unpkg.com/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js' });
+    await ff.load();
+    _ffmpeg=ff; return ff;
+  })();
+  return _ffmpegLoading;
+}
+// AudioBuffer -> 16-bit mono WAV blob
+function bufferToWav(audioBuf){
+  const sr=audioBuf.sampleRate, ch=audioBuf.getChannelData(0), n=ch.length;
+  const buf=new ArrayBuffer(44+n*2), dv=new DataView(buf);
+  const w=(o,s)=>{for(let i=0;i<s.length;i++)dv.setUint8(o+i,s.charCodeAt(i));};
+  w(0,'RIFF'); dv.setUint32(4,36+n*2,true); w(8,'WAVE'); w(12,'fmt ');
+  dv.setUint32(16,16,true); dv.setUint16(20,1,true); dv.setUint16(22,1,true);
+  dv.setUint32(24,sr,true); dv.setUint32(28,sr*2,true); dv.setUint16(32,2,true);
+  dv.setUint16(34,16,true); w(36,'data'); dv.setUint32(40,n*2,true);
+  for(let i=0;i<n;i++){ let s=Math.max(-1,Math.min(1,ch[i])); dv.setInt16(44+i*2, s<0?s*32768:s*32767, true); }
+  return new Blob([buf],{type:'audio/wav'});
+}
+// Render a proper MP4 (title image + audio) via ffmpeg. Portable + YouTube-ready.
 async function renderVideo(audioBuf,title,onProgress){
-  const dur=audioBuf.duration;
-  // draw the static title frame once
+  const status=m=>$('#makeStatus')&&($('#makeStatus').textContent=m);
+  const ff=await getFFmpeg(status);
+  const { fetchFile }=window.FFmpeg;
+  // title frame -> PNG
   bg(); wrapText(title,640,380,1080,76);
-  const actx=new audioCtxCls();
-  const asrc=actx.createBufferSource(); asrc.buffer=audioBuf;
-  const adest=actx.createMediaStreamDestination();
-  asrc.connect(adest);
-  const canvasStream=VC.captureStream(1);           // 1fps — static image, minimal CPU
-  const mixed=new MediaStream([...canvasStream.getVideoTracks(),...adest.stream.getAudioTracks()]);
-  const mime=MediaRecorder.isTypeSupported('video/mp4')?'video/mp4':
-    (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')?'video/webm;codecs=vp9,opus':'video/webm');
-  const rec=new MediaRecorder(mixed,{mimeType:mime,videoBitsPerSecond:1200000});
-  const chunks=[]; rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};
-  const done=new Promise(res=>rec.onstop=res);
-  rec.start(); asrc.start();
-  const t0=performance.now();
-  const tick=setInterval(()=>{ if(onProgress) onProgress(Math.min(0.99,(performance.now()-t0)/1000/dur)); },300);
-  await new Promise(res=>setTimeout(res,(dur+0.3)*1000));
-  clearInterval(tick);
-  rec.stop(); actx.close(); await done;
-  return new Blob(chunks,{type:mime});
+  const pngBlob=await new Promise(r=>VC.toBlob(r,'image/png'));
+  const wav=bufferToWav(audioBuf);
+  ff.FS('writeFile','title.png', await fetchFile(pngBlob));
+  ff.FS('writeFile','audio.wav', await fetchFile(wav));
+  // progress: ffmpeg reports ratio
+  ff.setProgress(({ratio})=>{ if(onProgress&&ratio>=0&&ratio<=1) onProgress(ratio); });
+  status('合成影片中…（長錄音需時數分鐘）');
+  try{
+    await ff.run('-loop','1','-i','title.png','-i','audio.wav',
+      '-c:v','libx264','-tune','stillimage','-pix_fmt','yuv420p','-r','2',
+      '-c:a','aac','-b:a','128k','-shortest','-movflags','+faststart','out.mp4');
+  }catch(e){ /* ffmpeg.wasm sometimes throws exit(0) on success */ }
+  const data=ff.FS('readFile','out.mp4');
+  try{ ff.FS('unlink','title.png'); ff.FS('unlink','audio.wav'); ff.FS('unlink','out.mp4'); }catch(e){}
+  return new Blob([data.buffer],{type:'video/mp4'});
 }
 
 // settings persistence (key / github)
