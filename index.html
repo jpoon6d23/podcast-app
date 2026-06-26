@@ -524,13 +524,22 @@ async function shareVideo(id){ const r=await getRec(id); if(!r||!r.video){ alert
   if(!w){ alert('影片已下載到你部電腦。請去 youtube.com/upload 拖上去發佈。'); }
 }
 
-/* ============ MAKE PODCAST (title at the end) ============ */
+/* ============ MAKE PODCAST ============ */
+// If the recording already has a name, make the video straight away (no extra prompt).
+// Only show the title card when there's no name yet (or merging multiple).
 async function startMake(ids,isMerge){
+  const first=await getRec(ids[0]);
+  const existing=(first&&(first.title||first.titleSug)||'').trim();
+  if(existing && !isMerge){
+    // one-tap: use the existing name, render now
+    await doMakeVideo(ids, existing);
+    return;
+  }
+  // need a title -> show the card
   makeContext={ids,isMerge};
   $('#makeCard').classList.remove('hidden');
-  $('#makeLabel').textContent=isMerge?('Make podcast from '+ids.length+' recordings'):'Make podcast';
-  const first=await getRec(ids[0]);
-  $('#title').value=(first&&(first.title||first.titleSug))||'';
+  $('#makeLabel').textContent=isMerge?('合併 '+ids.length+' 段做 podcast — 改個標題'):'改個標題';
+  $('#title').value=existing;
   $('#makeStatus').textContent='';
   drawPoster();
   $('#makeCard').scrollIntoView({behavior:'smooth'});
@@ -541,31 +550,32 @@ $('#title').addEventListener('input',drawPoster);
 $('#makeBtn').addEventListener('click', async ()=>{
   if(!makeContext){return;}
   const title=$('#title').value.trim();
-  if(!title){ $('#makeStatus').textContent='Enter a title first.'; return; }
-  $('#makeBtn').disabled=true; $('#prog').classList.remove('hidden');
-  const setP=p=>$('#prog>div').style.width=Math.round(p*100)+'%';
+  if(!title){ $('#makeStatus').textContent='請先入個標題。'; return; }
+  const ids=makeContext.ids;
+  $('#makeCard').classList.add('hidden'); makeContext=null;
+  await doMakeVideo(ids, title);
+});
+
+// shared: clean -> merge -> render -> save -> refresh, with progress shown in the recordings list status
+async function doMakeVideo(ids, title){
+  // find/scroll to a status area: reuse recStatus at top for feedback
+  const setMsg=m=>{ $('#recStatus').textContent=m; };
+  const setProg=p=>{ /* lightweight: show % in the message */ };
   try{
-    setP(0.05); $('#makeStatus').textContent='清理聲音中…';
-    // clean each recording with its own noise profile, then concatenate
+    setMsg('清理聲音中…');
     const buffers=[];
-    for(const id of makeContext.ids){ const r=await getRec(id); buffers.push(await cleanAudio(r.blob, r.mode||(r.nc!==false?'strong':'off'))); }
+    for(const id of ids){ const r=await getRec(id); buffers.push(await cleanAudio(r.blob, r.mode||(r.nc!==false?'strong':'off'))); }
     const merged=buffers.length>1?concatBuffers(buffers):buffers[0];
-    const mins=Math.ceil(merged.duration/60);
-    const blob=await renderVideo(merged,title,p=>{
-      setP(p);
-      $('#makeStatus').textContent='製作影片中… '+Math.round(p*100)+'%（約 '+mins+' 分鐘長，需時相若）';
-    });
-    setP(1);
-    // save video onto the FIRST recording (and set its title)
-    const firstId=makeContext.ids[0];
+    const mins=Math.max(1,Math.ceil(merged.duration/60));
+    const blob=await renderVideo(merged,title,p=>{ setMsg('製作影片中… '+Math.round(p*100)+'%（約 '+mins+' 分鐘，需時相若）'); });
+    const firstId=ids[0];
     const r=await getRec(firstId);
     r.title=title; r.video=blob; await putRec(r);
-    $('#makeStatus').textContent='完成 ✓ — 喺下面清單睇到。';
-    $('#makeCard').classList.add('hidden'); makeContext=null; selected.clear();
+    selected.clear();
+    setMsg('影片完成 ✓ —「'+title+'」。撳開嗰段就見到。');
     await renderList();
-  }catch(err){ $('#makeStatus').textContent='Error: '+err.message; }
-  finally{ $('#makeBtn').disabled=false; setTimeout(()=>$('#prog').classList.add('hidden'),800); }
-});
+  }catch(err){ setMsg('整片出錯：'+err.message); }
+}
 
 function concatBuffers(bufs){
   const sr=bufs[0].sampleRate;
@@ -714,7 +724,7 @@ function bufferToWav(audioBuf){
 }
 // Render a proper MP4 (title image + audio) via ffmpeg. Portable + YouTube-ready.
 async function renderVideo(audioBuf,title,onProgress){
-  const status=m=>$('#makeStatus')&&($('#makeStatus').textContent=m);
+  const status=m=>{ const a=$('#makeStatus'),b=$('#recStatus'); if(a)a.textContent=m; if(b)b.textContent=m; };
   const ff=await getFFmpeg(status);
   const { fetchFile }=window.FFmpeg;
   // clean any leftover files from a previous run (fixes 2nd-render failures)
