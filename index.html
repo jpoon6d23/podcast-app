@@ -717,22 +717,28 @@ async function renderVideo(audioBuf,title,onProgress){
   const status=m=>$('#makeStatus')&&($('#makeStatus').textContent=m);
   const ff=await getFFmpeg(status);
   const { fetchFile }=window.FFmpeg;
+  // clean any leftover files from a previous run (fixes 2nd-render failures)
+  ['title.png','audio.wav','out.mp4'].forEach(f=>{ try{ ff.FS('unlink',f); }catch(e){} });
   // title frame -> PNG
   bg(); wrapText(title,640,380,1080,76);
   const pngBlob=await new Promise(r=>VC.toBlob(r,'image/png'));
   const wav=bufferToWav(audioBuf);
   ff.FS('writeFile','title.png', await fetchFile(pngBlob));
   ff.FS('writeFile','audio.wav', await fetchFile(wav));
-  // progress: ffmpeg reports ratio
   ff.setProgress(({ratio})=>{ if(onProgress&&ratio>=0&&ratio<=1) onProgress(ratio); });
   status('合成影片中…（長錄音需時數分鐘）');
+  // -t = exact audio length so the video doesn't run long; input -t on the looped image bounds it too
+  const dur=Math.max(0.1, audioBuf.duration);
   try{
-    await ff.run('-loop','1','-i','title.png','-i','audio.wav',
+    await ff.run('-loop','1','-t',String(dur),'-i','title.png','-i','audio.wav',
       '-c:v','libx264','-tune','stillimage','-pix_fmt','yuv420p','-r','2',
-      '-c:a','aac','-b:a','128k','-shortest','-movflags','+faststart','out.mp4');
+      '-c:a','aac','-b:a','128k','-t',String(dur),'-movflags','+faststart','out.mp4');
   }catch(e){ /* ffmpeg.wasm sometimes throws exit(0) on success */ }
-  const data=ff.FS('readFile','out.mp4');
-  try{ ff.FS('unlink','title.png'); ff.FS('unlink','audio.wav'); ff.FS('unlink','out.mp4'); }catch(e){}
+  let data;
+  try{ data=ff.FS('readFile','out.mp4'); }
+  catch(e){ throw new Error('影片合成失敗，請再試一次'); }
+  ['title.png','audio.wav','out.mp4'].forEach(f=>{ try{ ff.FS('unlink',f); }catch(e){} });
+  if(!data || !data.length) throw new Error('影片是空的，請再試一次');
   return new Blob([data.buffer],{type:'video/mp4'});
 }
 
