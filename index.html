@@ -684,21 +684,21 @@ function drawPoster(){ bg(); wrapText(($('#title')?$('#title').value.trim():'')|
 drawPoster();
 
 // ---- ffmpeg.wasm (single-thread; works without crossOriginIsolated headers) ----
-let _ffmpeg=null, _ffmpegLoading=null;
+let _ffScriptLoaded=false;
 function loadScript(src){ return new Promise((res,rej)=>{ const s=document.createElement('script');
   s.src=src; s.onload=res; s.onerror=()=>rej(new Error('load '+src)); document.head.appendChild(s); }); }
+// IMPORTANT: a fresh ffmpeg instance every call. Re-running .run() on the same
+// instance crashes (that's why the 2nd video failed). The core file stays cached, so it's fast.
 async function getFFmpeg(onStatus){
-  if(_ffmpeg) return _ffmpeg;
-  if(_ffmpegLoading) return _ffmpegLoading;
-  _ffmpegLoading=(async()=>{
+  if(!_ffScriptLoaded){
     if(onStatus) onStatus('載入影片引擎中…（首次約 25MB，請等）');
     if(!window.FFmpeg) await loadScript('https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js');
-    const { createFFmpeg }=window.FFmpeg;
-    const ff=createFFmpeg({ log:false, mainName:'main', corePath:'https://unpkg.com/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js' });
-    await ff.load();
-    _ffmpeg=ff; return ff;
-  })();
-  return _ffmpegLoading;
+    _ffScriptLoaded=true;
+  }
+  const { createFFmpeg }=window.FFmpeg;
+  const ff=createFFmpeg({ log:false, mainName:'main', corePath:'https://unpkg.com/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js' });
+  await ff.load();
+  return ff;
 }
 // AudioBuffer -> 16-bit mono WAV blob
 function bufferToWav(audioBuf){
@@ -736,8 +736,10 @@ async function renderVideo(audioBuf,title,onProgress){
   }catch(e){ /* ffmpeg.wasm sometimes throws exit(0) on success */ }
   let data;
   try{ data=ff.FS('readFile','out.mp4'); }
-  catch(e){ throw new Error('影片合成失敗，請再試一次'); }
+  catch(e){ try{ ff.exit(); }catch(_){}; throw new Error('影片合成失敗，請再試一次'); }
   ['title.png','audio.wav','out.mp4'].forEach(f=>{ try{ ff.FS('unlink',f); }catch(e){} });
+  // tear down this instance fully so the next video starts clean
+  try{ ff.exit(); }catch(e){}
   if(!data || !data.length) throw new Error('影片是空的，請再試一次');
   return new Blob([data.buffer],{type:'video/mp4'});
 }
