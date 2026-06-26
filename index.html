@@ -770,13 +770,40 @@ async function pushTombstone(uid){
   const res=await ghApi(path,{ method:'PUT', body:JSON.stringify(body) });
   return res.ok;
 }
+const TOMB_TTL=7*24*60*60*1000; // tombstones expire after 7 days
 async function pullTombstones(){
   const res=await ghApi('deleted');
   if(res.status===404) return new Set();
   if(!res.ok) return new Set();
   const files=await res.json();
-  return new Set(files.filter(f=>f.name.endsWith('.json')).map(f=>f.name.replace(/\.json$/,'')));
+  const out=new Set();
+  for(const f of files){ if(!f.name.endsWith('.json'))continue;
+    const uid=f.name.replace(/\.json$/,'');
+    // read the tombstone's timestamp; skip + clean up if expired
+    let at=0;
+    try{ const fr=await ghApi('deleted/'+f.name); if(fr.ok){ const m=await fr.json();
+      at=(JSON.parse(b64ToUtf8((m.content||'').replace(/\n/g,''))).at)||0; } }catch(e){}
+    if(at && (Date.now()-at)>TOMB_TTL){
+      // expired -> delete the tombstone file so the uid is free again
+      try{ const ex=await ghApi('deleted/'+f.name); if(ex.ok){ const sha=(await ex.json()).sha;
+        await ghApi('deleted/'+f.name,{method:'DELETE',body:JSON.stringify({message:'expire '+uid,sha})}); } }catch(e){}
+      continue;
+    }
+    out.add(uid);
+  }
+  return out;
 }
+// one-time maintenance: wipe ALL tombstones (frees every uid)
+async function clearAllTombstones(){
+  try{ localStorage.removeItem('deletedUids'); }catch(e){}
+  const res=await ghApi('deleted'); if(!res.ok) return 'no deleted folder';
+  const files=await res.json(); let n=0;
+  for(const f of files){ if(!f.name.endsWith('.json'))continue;
+    const ex=await ghApi('deleted/'+f.name); if(ex.ok){ const sha=(await ex.json()).sha;
+      await ghApi('deleted/'+f.name,{method:'DELETE',body:JSON.stringify({message:'clear '+f.name,sha})}); n++; } }
+  return 'cleared '+n+' tombstones';
+}
+window.clearAllTombstones=clearAllTombstones;
 async function deleteRemoteRec(uid){
   const path='recordings/'+uid+'.json';
   const ex=await ghApi(path);
@@ -795,14 +822,14 @@ async function syncAll(){
     const local0=await allRecs();
     for(const r of local0){ if(!r.uid){ r.uid=newUid(); await putRec(r); } }
 
-    // ---- DELETES (tombstones) ----
+    // ---- DELETES (tombstones, expiring) ----
     const localDel=deletedSet();
-    // push our tombstones to GitHub
+    // push our (recent) tombstones to GitHub
     for(const uid of localDel){ await pushTombstone(uid); }
-    // pull remote tombstones, merge into our set
+    // pull remote tombstones (expired ones auto-cleaned inside)
     const remoteDel=await pullTombstones();
     let allDel=new Set([...localDel, ...remoteDel]);
-    try{ localStorage.setItem('deletedUids',JSON.stringify([...allDel])); }catch(e){}
+    // do NOT persist remote tombstones locally — let them expire on GitHub
     // delete any local recording that's tombstoned
     let removed=0;
     for(const r of await allRecs()){ if(r.uid && allDel.has(r.uid)){ await delRec(r.id); removed++; } }
