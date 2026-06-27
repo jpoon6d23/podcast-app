@@ -106,7 +106,11 @@
   <div class="card">
     <div class="timer" id="timer">00:00</div>
     <canvas id="liveCanvas" height="90" class="hidden"></canvas>
-    <button class="primary" id="recBtn">● Record</button>
+    <div class="row">
+      <button class="primary" id="recBtn">● Record</button>
+      <button class="ghost" id="pickBtn">⬆️ 上載錄音</button>
+    </div>
+    <div class="mini" style="text-align:left;margin-top:6px">用 iPhone「語音備忘錄」錄（收音較靚）→ 分享成檔案 → 喺度上載。上載嘅原汁原味，唔過抑噪。</div>
     <input type="file" id="fileInput" accept="audio/*" class="hidden">
     <div class="status" id="recStatus"></div>
   </div>
@@ -304,8 +308,10 @@ function endRecUI(){ isRecording=false; clearInterval(timerInt);
 if($('#pickBtn')) $('#pickBtn').addEventListener('click',()=>$('#fileInput').click());
 $('#fileInput').addEventListener('change', async e=>{
   const f=e.target.files[0]; if(!f)return;
-  await addRec({title:f.name.replace(/\.[^.]+$/,''), blob:f, date:Date.now(), dur:'', nc:(ncMode!=='off'), mode:ncMode});
-  $('#recStatus').textContent='Added "'+f.name+'" ✓';
+  // uploaded audio keeps its original sound — no noise cancellation (mode 'off')
+  await addRec({title:f.name.replace(/\.[^.]+$/,''), blob:f, date:Date.now(), dur:'', nc:false, mode:'off'});
+  $('#recStatus').textContent='已上載「'+f.name+'」✓（原聲，唔過抑噪）';
+  e.target.value='';
   await renderList();
 });
 
