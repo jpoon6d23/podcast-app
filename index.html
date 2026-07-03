@@ -141,9 +141,9 @@
   <details class="card" id="setupCard" style="padding:14px 18px;margin-top:24px">
     <summary style="cursor:pointer;font-size:13px;color:var(--muted);font-weight:600;list-style:none">⚙️ 設定</summary>
     <div style="margin-top:12px">
-      <label for="anthKey">Anthropic API key（整重點用）</label>
-      <input type="text" id="anthKey" placeholder="sk-ant-..." autocomplete="off">
-      <div class="mini" style="text-align:left;margin-top:8px">去 console.anthropic.com 增值後建一個 key。只存你部機。每段成本少過一毫美金。</div>
+      <label for="workerUrl">整重點 server 網址（Cloudflare Worker）</label>
+      <input type="text" id="workerUrl" placeholder="https://podcast-summary.你的名.workers.dev" autocomplete="off">
+      <div class="mini" style="text-align:left;margin-top:8px">跟 worker/DEPLOY-GUIDE.md 喺 Cloudflare 開一個（免費、唔使 OpenAI）。貼入嚟之後，每段錄音（包括上載嘅）就有「✨ 從錄音整重點」。</div>
     </div>
     <div style="margin-top:16px;border-top:1px solid #232a45;padding-top:14px">
       <label for="ghToken">GitHub token（手機↔電腦同步）</label>
@@ -355,7 +355,7 @@ async function renderList(){
               <button class="ghost small" data-usetitle="${r.id}" style="margin-top:6px">用呢個做標題</button></div>`:''}</div>`:''}
             <div class="autoStatus" data-autostatus="${r.id}"></div>
             <div class="recBtns" style="margin-top:8px">
-              <button class="${r.summary?'ghost':'primary'} small" data-auto="${r.id}">${r.summary?'重新整理重點':'✨ 整理重點'}</button>
+              <button class="${r.summary?'ghost':'primary'} small" data-auto="${r.id}">${r.summary?'重新整理重點':'✨ 從錄音整重點'}</button>
             </div>
             <details style="margin-top:8px"><summary style="font-size:12px;color:var(--muted);cursor:pointer">逐字稿 / 手動輸入</summary>
               <textarea data-notes="${r.id}" placeholder="自動轉錄會出現喺度。冇嘅話可以撳呢度，用 iPhone 鍵盤 🎤 講低，或者打字。">${(r.transcript||r.notes||'').replace(/</g,'&lt;')}</textarea>
@@ -452,36 +452,31 @@ async function useTitle(id){ const r=await getRec(id); if(!r||!r.titleSug)return
 /* ---- Anthropic key (stored on this device only) ---- */
 function getKey(){ try{ return (localStorage.getItem('anthropicKey')||'').trim(); }catch(e){ return ''; } }
 
-/* ---- Auto 重點 from the live transcript via Anthropic ---- */
+/* ---- 從錄音整重點：把音訊送去 Cloudflare Worker（轉文字 + 出重點） ---- */
+function getWorkerUrl(){ try{ return (localStorage.getItem('workerUrl')||'').trim(); }catch(e){ return ''; } }
 async function autoPoints(id){
   const r=await getRec(id); if(!r)return;
-  const text=(r.transcript||'').trim();
-  const st=document.querySelector('[data-autostatus="'+id+'"]');
   const setSt=m=>{ const e=document.querySelector('[data-autostatus="'+id+'"]'); if(e)e.textContent=m; $('#recStatus').textContent=m; };
-  if(!text){ setSt('沒有逐字稿 — 開 📝 自己打/講低再整。'); return; }
-  const key=getKey();
-  if(!key){ setSt('未貼 Anthropic key（撳上面「設定」）。'); $('#setupCard').setAttribute('open',''); $('#setupCard').scrollIntoView({behavior:'smooth'}); return; }
-  setSt('整理重點中…');
+  const url=getWorkerUrl();
+  if(!url){ setSt('未設定 server 網址（撳上面「⚙️ 設定」，跟 DEPLOY-GUIDE 開一個免費 Cloudflare Worker）。'); $('#setupCard').setAttribute('open',''); $('#setupCard').scrollIntoView({behavior:'smooth'}); return; }
+  if(!r.blob){ setSt('冇音訊。'); return; }
+  setSt('轉文字 + 整重點中…（可能要等一陣）');
   try{
-    const prompt='以下係一段錄音嘅逐字稿。用繁體中文(廣東話書面亦可)幫我:(1) 列出重點,用「• 」開頭嘅項目,精簡;(2) 一個短標題(8字內)。只用 JSON 回覆,格式:{"points":["重點1","重點2"],"title":"標題"}。逐字稿:\n\n'+text;
-    const res=await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',
-      headers:{ 'x-api-key':key, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true', 'content-type':'application/json' },
-      body:JSON.stringify({ model:'claude-haiku-4-5-20251001', max_tokens:1000, messages:[{role:'user',content:prompt}] })
-    });
+    const fd=new FormData();
+    const ext=r.blob.type.includes('mp4')?'m4a':(r.blob.type.includes('webm')?'webm':(r.blob.type.includes('mpeg')?'mp3':(r.blob.type.includes('wav')?'wav':'audio')));
+    fd.append('audio', r.blob, (r.title||'audio')+'.'+ext);
+    const res=await fetch(url,{ method:'POST', body:fd });
     const data=await res.json();
-    if(!res.ok){ setSt('失敗:'+((data.error&&data.error.message)||res.status)); return; }
-    const raw=(data.content&&data.content[0]&&data.content[0].text)||'';
-    let points=[],title='';
-    try{ const m=raw.match(/\{[\s\S]*\}/); const p=JSON.parse(m?m[0]:raw);
-      points=p.points||[]; title=p.title||''; }
-    catch(e){ points=raw.split('\n').filter(x=>x.trim()); }
+    if(!res.ok||data.error){ setSt('失敗：'+(data.error||res.status)+(data.detail?('　'+data.detail):'')); return; }
+    const points=data.points||[];
+    const title=data.title||'';
     const rr=await getRec(id);
-    rr.summary=points.map(p=>p.replace(/^[•\-\s]+/,'')).map(p=>'• '+p).join('\n');
+    rr.transcript=data.transcript||rr.transcript||'';
+    rr.summary=points.map(p=>p.replace(/^[•\-\s]+/,'')).filter(Boolean).map(p=>'• '+p).join('\n');
     rr.titleSug=title; if(!rr.title && title) rr.title=title;
     await putRec(rr); await renderList();
     $('#recStatus').textContent='重點整理好 ✓';
-  }catch(err){ setSt('錯誤:'+err.message); }
+  }catch(err){ setSt('錯誤：'+err.message); }
 }
 
 const SUM_STOP=new Set("the a an and or but if then of to in on at for with as is are was were be been being it its this that these those i you he she we they my your our their me him her us them do does did have has had will would can could should may might just so very really".split(' '));
@@ -764,7 +759,7 @@ function bindSetting(id,store){ const f=$('#'+id); if(!f)return;
   try{ f.value=localStorage.getItem(store)||''; }catch(e){}
   f.addEventListener('change',()=>{ try{ localStorage.setItem(store, f.value.trim()); }catch(e){} });
 }
-bindSetting('anthKey','anthropicKey');
+bindSetting('workerUrl','workerUrl');
 bindSetting('ghToken','ghToken');
 bindSetting('ghRepo','ghRepo');
 
