@@ -102,15 +102,9 @@
 <div class="wrap">
   <h1>🎙️ Podcast Maker</h1>
 
-  <!-- RECORD -->
+  <!-- UPLOAD -->
   <div class="card">
-    <div class="timer" id="timer">00:00</div>
-    <canvas id="liveCanvas" height="90" class="hidden"></canvas>
-    <div class="row">
-      <button class="primary" id="recBtn">● Record</button>
-      <button class="ghost" id="pickBtn">⬆️ 上載錄音</button>
-    </div>
-    <div class="mini" style="text-align:left;margin-top:6px">用 iPhone「語音備忘錄」錄（收音較靚）→ 分享成檔案 → 喺度上載。上載嘅原汁原味，唔過抑噪。</div>
+    <button class="primary" id="pickBtn">⬆️ 上載錄音</button>
     <input type="file" id="fileInput" accept="audio/*" class="hidden">
     <div class="status" id="recStatus"></div>
   </div>
@@ -238,7 +232,7 @@ async function getMic(){
   mediaStream=await navigator.mediaDevices.getUserMedia({audio:{noiseSuppression:ns,echoCancellation:ns,autoGainControl:true,channelCount:1}});
   return mediaStream;
 }
-$('#recBtn').addEventListener('click', async ()=>{
+if($('#recBtn'))$('#recBtn').addEventListener('click', async ()=>{
   if(isRecording){ recorder.stop(); return; }
   try{
     await getMic();
@@ -344,10 +338,10 @@ async function renderList(){
           <div style="margin:6px 0">${name}</div>
           <audio controls preload="none" src="${url}"></audio>
           <div class="speedRow">
-            <span>速度</span>
+            <button class="spd" data-seek="-15">⏪ 15s</button>
+            <button class="spd" data-seek="15">15s ⏩</button>
+            <span style="margin-left:auto">速度</span>
             <button class="spd active" data-spd="1">1x</button>
-            <button class="spd" data-spd="1.25">1.25x</button>
-            <button class="spd" data-spd="1.5">1.5x</button>
             <button class="spd" data-spd="2">2x</button>
           </div>
           <div class="recBtns">
@@ -370,7 +364,7 @@ async function renderList(){
           </details>
           ${r.video?`<div style="margin-top:10px"><video controls playsinline src="${URL.createObjectURL(r.video)}"></video>
             <button class="primary" data-share="${r.id}" style="margin-top:8px">📤 儲存 / 上載 YouTube</button>
-            <div class="mini" style="text-align:left;margin-top:6px">手機：彈出分享選單揀 YouTube。電腦：自動下載影片並開啟 YouTube 上載頁，拖檔案上去即可。</div></div>`:''}
+            <div class="mini" style="text-align:left;margin-top:6px">標題已自動複製，喺 YouTube 貼上即可。手機：彈出分享選單揀 YouTube。電腦：自動下載影片並開啟 YouTube 上載頁，拖檔案上去。</div></div>`:''}
         </div>
       </details>`;
     list.appendChild(row);
@@ -390,9 +384,12 @@ async function renderList(){
   list.querySelectorAll('[data-auto]').forEach(b=>b.onclick=()=>autoPoints(+b.dataset.auto));
   list.querySelectorAll('.speedRow').forEach(row=>{
     const audio=row.previousElementSibling; // the <audio> right before
-    row.querySelectorAll('.spd').forEach(b=>b.onclick=()=>{
+    row.querySelectorAll('.spd[data-spd]').forEach(b=>b.onclick=()=>{
       if(audio && audio.tagName==='AUDIO'){ audio.playbackRate=parseFloat(b.dataset.spd); }
-      row.querySelectorAll('.spd').forEach(x=>x.classList.toggle('active',x===b));
+      row.querySelectorAll('.spd[data-spd]').forEach(x=>x.classList.toggle('active',x===b));
+    });
+    row.querySelectorAll('.spd[data-seek]').forEach(b=>b.onclick=()=>{
+      if(audio && audio.tagName==='AUDIO'){ audio.currentTime=Math.max(0, audio.currentTime + parseFloat(b.dataset.seek)); }
     });
   });
   list.querySelectorAll('[data-usetitle]').forEach(b=>b.onclick=()=>useTitle(+b.dataset.usetitle));
@@ -519,6 +516,8 @@ async function shareVideo(id){ const r=await getRec(id); if(!r||!r.video){ alert
   const ext=r.video.type.includes('mp4')?'mp4':'webm';
   const name=(r.title||'podcast')+'.'+ext;
   const file=new File([r.video],name,{type:r.video.type});
+  // copy the title to clipboard so you can paste it straight into YouTube
+  try{ await navigator.clipboard.writeText(r.title||''); }catch(e){}
   // Phone only: native share sheet (incl. YouTube app)
   if(IS_MOBILE && navigator.canShare && navigator.canShare({files:[file]})){
     try{ await navigator.share({files:[file],title:r.title||'podcast'}); return; }
