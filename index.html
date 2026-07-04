@@ -358,8 +358,8 @@ async function renderList(){
           <div class="autoStatus" data-autostatus="${r.id}" style="color:var(--muted);font-size:12px;margin-top:8px"></div>
           ${r.titleSug?`<div style="margin-top:10px">💡 建議標題：<b>${r.titleSug.replace(/</g,'&lt;')}</b></div>`:''}
           ${r.summary?`<div style="margin-top:8px"><div style="font-weight:600;font-size:13px;margin-bottom:4px">重點</div><div style="white-space:pre-line">${r.summary.replace(/</g,'&lt;')}</div></div>`:''}
-          ${r.transcript?`<div style="margin-top:8px"><div style="font-weight:600;font-size:13px;margin-bottom:4px">逐字稿</div><div style="max-height:160px;overflow:auto;white-space:pre-wrap;font-size:13px;line-height:1.5;background:rgba(255,255,255,.04);padding:8px;border-radius:8px">${r.transcript.replace(/</g,'&lt;')}</div></div>`:''}
-          ${!r.summary?`<div class="recBtns" style="margin-top:8px"><button class="ghost small" data-auto="${r.id}">${r.transcript?'再整重點':'✨ 整理逐字稿 + 重點'}</button></div>`:''}
+          ${r.transcript?`<details style="margin-top:8px"><summary style="cursor:pointer;font-size:13px;color:var(--muted)">📄 睇逐字稿</summary><div style="max-height:200px;overflow:auto;white-space:pre-wrap;font-size:13px;line-height:1.5;background:rgba(255,255,255,.04);padding:8px;border-radius:8px;margin-top:6px">${r.transcript.replace(/</g,'&lt;')}</div></details>`:''}
+          ${(!r.summary && !r.transcript)?`<div class="recBtns" style="margin-top:8px"><button class="ghost small" data-auto="${r.id}">✨ 整理逐字稿 + 重點</button></div>`:''}
           ${r.video?`<div style="margin-top:10px"><video controls playsinline src="${URL.createObjectURL(r.video)}"></video>
             <button class="primary" data-share="${r.id}" style="margin-top:8px">📤 儲存 / 上載 YouTube</button>
             <div class="mini" style="text-align:left;margin-top:6px">標題已自動複製，喺 YouTube 貼上即可。手機：彈出分享選單揀 YouTube。電腦：自動下載影片並開啟 YouTube 上載頁，拖檔案上去。</div></div>`:''}
