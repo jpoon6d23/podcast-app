@@ -10,6 +10,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-180.png">
 <title>Podcast Maker</title>
+<script src="https://cdn.jsdelivr.net/npm/opencc-js@1.0.5/dist/umd/full.js"></script>
 <style>
   :root{ --bg:#0b0d17; --panel:#161a2b; --panel2:#1f2438; --accent:#6c5ce7;
     --accent2:#00d2ff; --text:#eef1ff; --muted:#8b91b5; --good:#2ecc71; --bad:#ff5c7a; }
@@ -452,6 +453,15 @@ function getKey(){ try{ return (localStorage.getItem('anthropicKey')||'').trim()
 
 /* ---- 從錄音整重點：把音訊送去 Cloudflare Worker（轉文字 + 出重點） ---- */
 function getWorkerUrl(){ try{ return (localStorage.getItem('workerUrl')||'').trim(); }catch(e){ return ''; } }
+// Simplified -> Traditional (HK) using opencc-js if it loaded; else return as-is
+let _s2t=null;
+function toTrad(s){
+  s=String(s||'');
+  try{
+    if(!_s2t && window.OpenCC) _s2t=OpenCC.Converter({from:'cn',to:'hk'});
+    return _s2t? _s2t(s): s;
+  }catch(e){ return s; }
+}
 async function autoPoints(id){
   const r=await getRec(id); if(!r)return;
   const setSt=m=>{ const e=document.querySelector('[data-autostatus="'+id+'"]'); if(e)e.textContent=m; $('#recStatus').textContent=m; };
@@ -469,9 +479,9 @@ async function autoPoints(id){
     const points=data.points||[];
     const title=data.title||'';
     const rr=await getRec(id);
-    rr.transcript=data.transcript||rr.transcript||'';
-    rr.summary=points.map(p=>p.replace(/^[•\-\s]+/,'')).filter(Boolean).map(p=>'• '+p).join('\n');
-    rr.titleSug=title; if(!rr.title && title) rr.title=title;
+    rr.transcript=toTrad(data.transcript||rr.transcript||'');
+    rr.summary=points.map(p=>toTrad(p.replace(/^[•\-\s]+/,''))).filter(Boolean).map(p=>'• '+p).join('\n');
+    rr.titleSug=toTrad(title); if(!rr.title && rr.titleSug) rr.title=rr.titleSug;
     await putRec(rr); await renderList();
     $('#recStatus').textContent='重點整理好 ✓';
   }catch(err){ setSt('錯誤：'+err.message); }
