@@ -412,24 +412,38 @@ function moveSel(id,dir){
   const t=selOrder[i]; selOrder[i]=selOrder[j]; selOrder[j]=t;
   updateMergeBar();
 }
+let mergePrev=null, mergePrevId=null;
+function fmtDT(ts){ try{ const d=new Date(ts); return (d.getMonth()+1)+'月'+d.getDate()+'日 '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }catch(e){ return ''; } }
+async function playPrev(id){
+  const r=await getRec(id); if(!r||!r.blob)return;
+  if(mergePrev){ mergePrev.pause(); }
+  if(mergePrevId===id){ mergePrevId=null; return; }   // tap same -> stop
+  mergePrev=new Audio(URL.createObjectURL(r.blob)); mergePrevId=id;
+  mergePrev.play().catch(()=>{});
+  mergePrev.onended=()=>{ mergePrevId=null; };
+}
 async function updateMergeBar(){
   const bar=$('#mergeBar'); const box=$('#mergeOrder');
-  if(selected.size<1){ bar.classList.add('hidden'); return; }
+  if(selected.size<1){ bar.classList.add('hidden'); if(mergePrev)mergePrev.pause(); return; }
   bar.classList.remove('hidden');
   $('#mergeBtn').style.display = selected.size>=2 ? '' : 'none';
   if(selected.size>=2){
-    $('#mergeInfo').textContent='已選 '+selected.size+' 段。用 ▲▼ 排你要嘅順序，再合併：';
+    $('#mergeInfo').innerHTML='合併次序（由上到下）。撳 ▶ 聽下邊段，▲▼ 調位：';
     const recs={}; for(const id of selOrder){ const r=await getRec(id); if(r) recs[id]=r; }
-    box.innerHTML=selOrder.map((id,idx)=>{ const r=recs[id]; const nm=(r&&(r.title||'未命名')||'').replace(/</g,'&lt;');
-      return '<div style="display:flex;align-items:center;gap:6px;padding:4px 0">'
-        +'<span style="width:20px;text-align:right;color:var(--muted)">'+(idx+1)+'.</span>'
-        +'<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+nm+'</span>'
+    box.innerHTML=selOrder.map((id,idx)=>{ const r=recs[id]||{};
+      const nm=((r.title||r.titleSug||'未命名')+'').replace(/</g,'&lt;');
+      const when=r.date?fmtDT(r.date):'';
+      return '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;'+(idx?'border-top:1px solid var(--border)':'')+'">'
+        +'<span style="width:24px;height:24px;flex:none;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700">'+(idx+1)+'</span>'
+        +'<div style="flex:1;min-width:0"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+nm+'</div><div class="mini" style="margin:0">'+when+'</div></div>'
+        +'<button class="ghost small" data-play="'+id+'" title="試聽">▶</button>'
         +'<button class="ghost small" data-mvup="'+id+'" '+(idx===0?'disabled':'')+'>▲</button>'
         +'<button class="ghost small" data-mvdn="'+id+'" '+(idx===selOrder.length-1?'disabled':'')+'>▼</button>'
         +'</div>';
     }).join('');
     box.querySelectorAll('[data-mvup]').forEach(b=>b.onclick=()=>moveSel(+b.dataset.mvup,-1));
     box.querySelectorAll('[data-mvdn]').forEach(b=>b.onclick=()=>moveSel(+b.dataset.mvdn,1));
+    box.querySelectorAll('[data-play]').forEach(b=>b.onclick=()=>playPrev(+b.dataset.play));
   } else { $('#mergeInfo').textContent='已選 1 段。再揀多段先可以合併。'; box.innerHTML=''; }
 }
 $('#clearSelBtn').onclick=()=>{ selected.clear(); selOrder=[]; renderList(); };
