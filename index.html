@@ -306,9 +306,9 @@ if($('#pickBtn')) $('#pickBtn').addEventListener('click',()=>$('#fileInput').cli
 $('#fileInput').addEventListener('change', async e=>{
   const f=e.target.files[0]; if(!f)return;
   // uploaded audio keeps its original sound — no noise cancellation (mode 'off')
-  const id=await addRec({title:f.name.replace(/\.[^.]+$/,''), blob:f, date:Date.now(), dur:'', nc:false, mode:'off'});
+  const id=await addRec({title:f.name.replace(/\.[^.]+$/,''), blob:f, date:Date.now(), dur:'', nc:false, mode:'off', updatedAt:Date.now()});
   e.target.value='';
-  const opened=openRecIds; opened.add(id);   // keep the new row expanded so status/结果 shows
+  // row stays COLLAPSED — tap it to see transcript / 建議標題 / 重點
   await renderList();
   // auto: straight away make the transcript + suggested title (no extra button press)
   if(getWorkerUrl()){
@@ -400,7 +400,7 @@ async function renderList(){
   updateMergeBar();
 }
 async function renameRec(id,name){ const r=await getRec(id); if(!r)return; r.title=name.trim();
-  if(r.video){ /* keep */ } await putRec(r); await renderList(); }
+  r.updatedAt=Date.now(); if(r.video){ /* keep */ } await putRec(r); await renderList(); maybeSync(); }
 function toggleSel(id){
   if(selected.has(id)){ selected.delete(id); selOrder=selOrder.filter(x=>x!==id); }
   else { selected.add(id); selOrder.push(id); }
@@ -521,7 +521,8 @@ async function autoPoints(id){
     rr.transcript=toTrad(data.transcript||rr.transcript||'');
     rr.summary=points.map(p=>toTrad(p.replace(/^[•\-\s]+/,''))).filter(Boolean).map(p=>'• '+p).join('\n');
     rr.titleSug=toTrad(title); if(!rr.title && rr.titleSug) rr.title=rr.titleSug;
-    await putRec(rr); await renderList();
+    rr.updatedAt=Date.now();
+    await putRec(rr); await renderList(); maybeSync();
     $('#recStatus').textContent='重點整理好 ✓';
   }catch(err){ setSt('錯誤：'+err.message); }
 }
@@ -617,7 +618,7 @@ async function doMakeVideo(ids, title){
     const blob=await renderVideo(merged,title,p=>{ setMsg('製作影片中… '+Math.round(p*100)+'%（約 '+mins+' 分鐘，需時相若）'); });
     const firstId=ids[0];
     const r=await getRec(firstId);
-    r.title=title; r.video=blob; await putRec(r);
+    r.title=title; r.video=blob; r.updatedAt=Date.now(); await putRec(r);
     selected.clear();
     setMsg('影片完成 ✓ —「'+title+'」。撳開嗰段就見到。');
     await renderList();
@@ -839,6 +840,7 @@ async function pushRec(r){
   const audioB64=await blobToB64(r.blob);
   const payload={ uid, title:r.title||'', date:r.date, dur:r.dur||'', mode:r.mode||'windy',
     transcript:r.transcript||'', summary:r.summary||'', titleSug:r.titleSug||'',
+    updatedAt:r.updatedAt||r.date||0,
     audioType:r.blob.type||'audio/webm', audio:audioB64 };
   const path='recordings/'+uid+'.json';
   // need existing sha to update
@@ -926,6 +928,21 @@ async function deleteRemoteRec(uid){
   const sha=(await ex.json()).sha;
   await ghApi(path,{ method:'DELETE', body:JSON.stringify({ message:'remove '+uid, sha }) });
 }
+// local has a non-empty field that the remote copy is missing -> push to fill it in
+function localRicher(r, rd){
+  return ['summary','titleSug','transcript'].some(k=>{ const lv=(r[k]||'').trim(), rv=(rd[k]||'').trim(); return lv && !rv; });
+}
+// merge remote fields into a local record; returns true if anything changed
+function mergeFields(local, remote){
+  const rNew=(remote.updatedAt||0) > (local.updatedAt||0);
+  let changed=false;
+  ['title','titleSug','summary','transcript','dur','mode'].forEach(k=>{
+    const rv=remote[k]||'', lv=local[k]||'';
+    if(rv && rv!==lv && (rNew || !lv)){ local[k]=rv; changed=true; }
+  });
+  if(rNew && (remote.updatedAt||0)!==(local.updatedAt||0)){ local.updatedAt=remote.updatedAt; changed=true; }
+  return changed;
+}
 async function syncAll(){
   const {token,repo}=ghCfg();
   const st=$('#syncStatus');
@@ -951,26 +968,34 @@ async function syncAll(){
     // delete the recording file on GitHub for any tombstone
     for(const uid of allDel){ await deleteRemoteRec(uid); }
 
-    // 1) pull remote recordings, add any new (skip tombstoned)
+    // 1) pull remote: add new, UPDATE existing when remote is newer / has more
     const remote=await pullAll();
+    const remoteByUid={}; remote.forEach(x=>{ remoteByUid[x.uid]=x; });
     const local=await allRecs();
-    const localUids=new Set(local.map(r=>r.uid));
-    let added=0;
+    const localByUid={}; local.forEach(x=>{ localByUid[x.uid]=x; });
+    let added=0, updated=0;
     for(const rd of remote){
       if(allDel.has(rd.uid)) continue;
-      if(localUids.has(rd.uid)) continue;
-      const blob=b64ToBlob(rd.audio, rd.audioType);
-      await addRec({ uid:rd.uid, title:rd.title||'', blob, date:rd.date, dur:rd.dur||'', nc:true, mode:rd.mode||'windy',
-        transcript:rd.transcript||'', summary:rd.summary||'', titleSug:rd.titleSug||'' });
-      added++;
+      const lm=localByUid[rd.uid];
+      if(!lm){
+        const blob=b64ToBlob(rd.audio, rd.audioType);
+        await addRec({ uid:rd.uid, title:rd.title||'', blob, date:rd.date, dur:rd.dur||'', nc:true, mode:rd.mode||'windy',
+          transcript:rd.transcript||'', summary:rd.summary||'', titleSug:rd.titleSug||'', updatedAt:rd.updatedAt||rd.date||0 });
+        added++;
+      } else if(mergeFields(lm, rd)){
+        await putRec(lm); updated++;
+      }
     }
-    // 2) push local ones missing remotely (skip tombstoned)
-    const remoteUids=new Set(remote.map(x=>x.uid));
+    // 2) push local: add missing, and update remote when local is newer
     const local2=await allRecs();
     let pushed=0;
-    for(const r of local2){ if(allDel.has(r.uid)) continue; if(!remoteUids.has(r.uid)){ if(await pushRec(r)) pushed++; } }
+    for(const r of local2){ if(allDel.has(r.uid)) continue;
+      const rd=remoteByUid[r.uid];
+      if(!rd){ if(await pushRec(r)) pushed++; }
+      else if((r.updatedAt||0) > (rd.updatedAt||0) || localRicher(r,rd)){ if(await pushRec(r)) pushed++; }
+    }
     await renderList();
-    st.textContent='同步完成 ✓（拉返 '+added+'，上傳 '+pushed+'，刪除 '+removed+'）';
+    st.textContent='同步完成 ✓（拉 '+added+'，改 '+updated+'，傳 '+pushed+'，刪 '+removed+'）';
   }catch(err){ st.textContent='同步失敗：'+err.message; }
   finally{ syncBusy=false; }
 }
