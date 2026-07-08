@@ -360,7 +360,7 @@ async function renderList(){
           </div>
           <div class="autoStatus" data-autostatus="${r.id}" style="color:var(--muted);font-size:12px;margin-top:8px"></div>
           ${r.titleSug?`<div style="margin-top:10px">💡 建議標題：<b>${r.titleSug.replace(/</g,'&lt;')}</b></div>`:''}
-          ${r.summary?`<div style="margin-top:8px"><div style="font-weight:600;font-size:13px;margin-bottom:4px">重點</div><div style="white-space:pre-line">${r.summary.replace(/</g,'&lt;')}</div></div>`:''}
+          ${r.summary?`<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:600;font-size:13px">📌 重點（撳開）</summary><div style="white-space:pre-line;margin-top:6px">${r.summary.replace(/</g,'&lt;')}</div></details>`:''}
           ${r.transcript?`<details style="margin-top:8px"><summary style="cursor:pointer;font-size:13px;color:var(--muted)">📄 睇逐字稿</summary><div style="max-height:200px;overflow:auto;white-space:pre-wrap;font-size:13px;line-height:1.5;background:rgba(255,255,255,.04);padding:8px;border-radius:8px;margin-top:6px">${r.transcript.replace(/</g,'&lt;')}</div></details>`:''}
           ${(!r.summary && !r.transcript)?`<div class="recBtns" style="margin-top:8px"><button class="ghost small" data-auto="${r.id}">✨ 整理逐字稿 + 重點</button></div>`:''}
           ${r.video?`<div style="margin-top:10px"><video controls playsinline src="${URL.createObjectURL(r.video)}"></video>
