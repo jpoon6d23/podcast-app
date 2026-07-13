@@ -204,6 +204,20 @@ async function allRecs(){ const s=await tx('recordings','readonly');
     c.onsuccess=e=>{const cur=e.target.result;if(cur){out.push(cur.value);cur.continue();}else res(out);};c.onerror=()=>rej(c.error);}); }
 async function delRec(id){ const s=await tx('recordings','readwrite');
   return new Promise(res=>{s.delete(id).onsuccess=res;}); }
+// remove duplicate records that share the same uid (keeps the richest copy)
+async function dedupeRecs(){
+  const all=await allRecs();
+  const seen={}; let removed=0;
+  const score=x=>((x.video?4:0)+(x.summary?2:0)+(x.transcript?1:0)+((x.updatedAt||0)/1e15));
+  for(const r of all){
+    if(!r.uid) continue;
+    const keep=seen[r.uid];
+    if(!keep){ seen[r.uid]=r; continue; }
+    if(score(r)>score(keep)){ await delRec(keep.id); seen[r.uid]=r; removed++; }
+    else { await delRec(r.id); removed++; }
+  }
+  return removed;
+}
 
 function timeAgo(ts){const s=Math.floor((Date.now()-ts)/1000);
   if(s<60)return 'just now'; if(s<3600)return Math.floor(s/60)+'m ago';
@@ -509,10 +523,8 @@ async function autoPoints(id){
   if(!r.blob){ setSt('冇音訊。'); return; }
   setSt('轉文字 + 整重點中…（可能要等一陣）');
   try{
-    const fd=new FormData();
-    const ext=r.blob.type.includes('mp4')?'m4a':(r.blob.type.includes('webm')?'webm':(r.blob.type.includes('mpeg')?'mp3':(r.blob.type.includes('wav')?'wav':'audio')));
-    fd.append('audio', r.blob, (r.title||'audio')+'.'+ext);
-    const res=await fetch(url,{ method:'POST', body:fd });
+    // send the audio as the RAW body (not FormData) — reliable on iOS Safari
+    const res=await fetch(url,{ method:'POST', headers:{ 'Content-Type': r.blob.type||'application/octet-stream' }, body:r.blob });
     const data=await res.json();
     if(!res.ok||data.error){ setSt('失敗：'+(data.error||res.status)+(data.detail?('　'+data.detail):'')); return; }
     const points=data.points||[];
@@ -947,9 +959,13 @@ async function syncAll(){
   const {token,repo}=ghCfg();
   const st=$('#syncStatus');
   if(!token||!repo){ st.textContent='請先填 GitHub token 同 repo。'; return; }
-  if(syncBusy){ return; } syncBusy=true;
+  if(syncBusy){ return; }
+  // cross-tab lock so two tabs don't sync at once (which created duplicates); 60s TTL frees a crashed tab
+  try{ const now=Date.now(); const cur=+(localStorage.getItem('syncLock')||0); if(now-cur<60000){ return; } localStorage.setItem('syncLock',String(now)); }catch(e){}
+  syncBusy=true;
   st.textContent='同步中…';
   try{
+    await dedupeRecs();     // clean any duplicate-uid rows first
     // ensure every local recording has a uid first
     const local0=await allRecs();
     for(const r of local0){ if(!r.uid){ r.uid=newUid(); await putRec(r); } }
@@ -994,14 +1010,15 @@ async function syncAll(){
       if(!rd){ if(await pushRec(r)) pushed++; }
       else if((r.updatedAt||0) > (rd.updatedAt||0) || localRicher(r,rd)){ if(await pushRec(r)) pushed++; }
     }
+    await dedupeRecs();     // clean any duplicate created during this sync
     await renderList();
     st.textContent='同步完成 ✓（拉 '+added+'，改 '+updated+'，傳 '+pushed+'，刪 '+removed+'）';
   }catch(err){ st.textContent='同步失敗：'+err.message; }
-  finally{ syncBusy=false; }
+  finally{ syncBusy=false; try{ localStorage.removeItem('syncLock'); }catch(e){} }
 }
 $('#syncBtn').onclick=syncAll;
 
-renderList();
+dedupeRecs().then(renderList).catch(()=>renderList());
 // auto-sync on load + every 90s while the app is open (only if configured & tab visible)
 (function(){
   const cfgOk=()=>{ const {token,repo}=ghCfg(); return token&&repo; };
