@@ -118,6 +118,7 @@
       <div class="mini" id="mergeInfo" style="margin:0 0 8px;color:var(--text)"></div>
       <div id="mergeOrder" style="margin:0 0 8px"></div>
       <button class="primary" id="mergeBtn">🔗 合併成一個 podcast</button>
+      <button class="ghost" id="exportAudioBtn" style="margin-top:8px">⬇️ 匯出合併音檔(.m4a)</button>
       <div class="row" style="margin-top:8px">
         <button class="danger" id="delSelBtn">🗑 刪除所選</button>
         <button class="ghost" id="clearSelBtn">清除選取</button>
@@ -370,6 +371,7 @@ async function renderList(){
           </div>
           <div class="recBtns">
             <button class="primary small" data-make="${r.id}">🎬 Make podcast</button>
+            <button class="ghost small" data-expaudio="${r.id}">⬇️ 音檔</button>
             <button class="ghost icon" data-del="${r.id}" title="Delete">🗑</button>
           </div>
           <div class="autoStatus" data-autostatus="${r.id}" style="color:var(--muted);font-size:12px;margin-top:8px"></div>
@@ -391,6 +393,7 @@ async function renderList(){
   }));
   list.querySelectorAll('[data-sel]').forEach(b=>b.onclick=(e)=>{ e.preventDefault(); e.stopPropagation(); toggleSel(+b.dataset.sel); });
   list.querySelectorAll('[data-make]').forEach(b=>b.onclick=()=>startMake([+b.dataset.make],false));
+  list.querySelectorAll('[data-expaudio]').forEach(b=>b.onclick=()=>exportAudio([+b.dataset.expaudio]));
   list.querySelectorAll('[data-wa]').forEach(b=>b.onclick=()=>sendRec(+b.dataset.wa));
   list.querySelectorAll('[data-dl]').forEach(b=>b.onclick=()=>downloadRec(+b.dataset.dl));
   list.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>removeRec(+b.dataset.del));
@@ -462,6 +465,7 @@ async function updateMergeBar(){
 }
 $('#clearSelBtn').onclick=()=>{ selected.clear(); selOrder=[]; renderList(); };
 $('#mergeBtn').onclick=()=>{ const ids=[...selOrder]; startMake(ids,true); };
+$('#exportAudioBtn').onclick=()=>exportAudio([...selOrder]);
 $('#delSelBtn').onclick=async()=>{ const ids=[...selected];
   if(!ids.length)return;
   if(confirm('刪除所選的 '+ids.length+' 段錄音？此動作無法復原。')){
@@ -759,6 +763,33 @@ function loadScript(src){ return new Promise((res,rej)=>{ const s=document.creat
   s.src=src; s.onload=res; s.onerror=()=>rej(new Error('load '+src)); document.head.appendChild(s); }); }
 // IMPORTANT: a fresh ffmpeg instance every call. Re-running .run() on the same
 // instance crashes (that's why the 2nd video failed). The core file stays cached, so it's fast.
+// export merged/single recording(s) as an .m4a audio file (for Spotify / RSS hosts)
+async function exportAudio(ids){
+  if(!ids||!ids.length){ $('#recStatus').textContent='未揀錄音。'; return; }
+  const setMsg=m=>{ $('#recStatus').textContent=m; };
+  try{
+    setMsg('準備音檔中…');
+    const buffers=[];
+    for(const id of ids){ const r=await getRec(id); if(r&&r.blob) buffers.push(await cleanAudio(r.blob, r.mode||(r.nc!==false?'strong':'off'))); }
+    if(!buffers.length){ setMsg('冇音訊。'); return; }
+    const merged=buffers.length>1?concatBuffers(buffers):buffers[0];
+    const wav=bufferToWav(merged);
+    const ff=await getFFmpeg(setMsg);
+    const { fetchFile }=window.FFmpeg;
+    ['in.wav','out.m4a'].forEach(f=>{ try{ ff.FS('unlink',f); }catch(e){} });
+    ff.FS('writeFile','in.wav', await fetchFile(wav));
+    setMsg('轉做 m4a 中…（長錄音需時）');
+    try{ await ff.run('-i','in.wav','-c:a','aac','-b:a','128k','-movflags','+faststart','out.m4a'); }catch(e){}
+    let data; try{ data=ff.FS('readFile','out.m4a'); }catch(e){ try{ ff.exit(); }catch(_){}; throw new Error('音檔匯出失敗，請再試'); }
+    ['in.wav','out.m4a'].forEach(f=>{ try{ ff.FS('unlink',f); }catch(e){} });
+    try{ ff.exit(); }catch(e){}
+    if(!data||!data.length) throw new Error('音檔係空');
+    const first=await getRec(ids[0]);
+    const name=(((first&&(first.title||first.titleSug))||'podcast')+'').replace(/[\\/:*?"<>|]+/g,'_').slice(0,80);
+    saveBlob(new Blob([data.buffer],{type:'audio/mp4'}), name+'.m4a');
+    setMsg('音檔匯出好 ✓ —「'+name+'.m4a」。上去 Spotify for Creators 就得。');
+  }catch(err){ setMsg('匯出音檔出錯：'+err.message); }
+}
 async function getFFmpeg(onStatus){
   if(!_ffScriptLoaded){
     if(onStatus) onStatus('載入影片引擎中…（首次約 25MB，請等）');
